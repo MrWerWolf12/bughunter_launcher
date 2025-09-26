@@ -1,45 +1,48 @@
 import os
 import requests
-import zipfile
-import io
 
+# Папка Minecraft
 MINECRAFT_DIR = r"C:\Users\mrwer\AppData\Roaming\.minecraft"
 MODS_DIR = os.path.join(MINECRAFT_DIR, "mods")
 
-# Прямая публичная ссылка на архив с модами
-MODS_ARCHIVE_URL = "https://disk.yandex.ru/d/xEAvcbv0irqdDg/download"  # ссылка на скачивание архива
+
+REPO = "MrWerWolf12/bughunter_launcher"
+BRANCH = "main"
 
 def ensure_mods(progress_callback=None):
-    """Скачивает архив с модами и распаковывает его в папку mods, заменяя файлы при совпадении."""
+    """
+    Проверяет список модов в GitHub-репозитории и скачивает недостающие .jar файлы.
+    """
     if not os.path.exists(MODS_DIR):
         os.makedirs(MODS_DIR)
 
-    print("[Mod Manager] Скачиваем архив модов...")
-    response = requests.get(MODS_ARCHIVE_URL, stream=True)
+    print(f"[Mod Manager] Получаем список файлов из {REPO}/mods...")
+    api_url = f"https://api.github.com/repos/{REPO}/contents/mods?ref={BRANCH}"
+    response = requests.get(api_url)
     response.raise_for_status()
+    files = response.json()
 
-    total_size = int(response.headers.get('content-length', 0))
+    # Оставляем только jar
+    jar_files = [f for f in files if f["name"].endswith(".jar")]
+
+    total_files = len(jar_files)
     downloaded = 0
-    chunks = []
 
-    for chunk in response.iter_content(chunk_size=1024):
-        if chunk:
-            chunks.append(chunk)
-            downloaded += len(chunk)
-            if progress_callback and total_size > 0:
-                progress_callback(int(downloaded / total_size * 100))
+    for f in jar_files:
+        target_path = os.path.join(MODS_DIR, f["name"])
+        if os.path.exists(target_path):
+            print(f"[Mod Manager] Уже есть: {f['name']}")
+            continue
 
-    archive_data = io.BytesIO(b''.join(chunks))
+        print(f"[Mod Manager] Скачиваем: {f['name']}...")
+        download_url = f["download_url"]
+        r = requests.get(download_url)
+        r.raise_for_status()
+        with open(target_path, "wb") as out_file:
+            out_file.write(r.content)
 
-    print("[Mod Manager] Распаковываем архив...")
-    with zipfile.ZipFile(archive_data) as zip_ref:
-        for member in zip_ref.namelist():
-            filename = os.path.basename(member)
-            if not filename:
-                continue  # пропускаем папки
-            source = zip_ref.open(member)
-            target_path = os.path.join(MODS_DIR, filename)
-            with open(target_path, "wb") as target:
-                with source:
-                    target.write(source.read())
-    print("[Mod Manager] Все моды обновлены.")
+        downloaded += 1
+        if progress_callback and total_files > 0:
+            progress_callback(int(downloaded / total_files * 100))
+
+    print("[Mod Manager] Проверка завершена, недостающие моды загружены.")
